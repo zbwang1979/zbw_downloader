@@ -84,6 +84,7 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
                 print("Your text has unicode problem!")
 
     def page_open(self,requests_obj,url):
+        self.raise_wait()
         try:
             self.is_busy = True
             time.sleep(5 * random.random())
@@ -96,6 +97,7 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
             return
 
     def page_post(self,requests_obj,url,data):
+        self.raise_wait()
         try:
             self.is_busy = True
             time.sleep(5 * random.random())
@@ -227,9 +229,7 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
     def run_flow(self):
         while True:
             if not self.login_status:
-                self.raise_wait()
                 self.log_in()
                 continue
-            self.raise_wait()
             self.web_process()
             time.sleep(5)
