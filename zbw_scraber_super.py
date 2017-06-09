@@ -248,6 +248,7 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
 
     def web_process(self):
         print('begin download here')
+        print(self.working_list)
         # r=self.page_open(self.s,'https://www.instagram.com/p/BU_PRutlBfw/?taken-by=9gag')
 
         '''{"__typename": "GraphImage", "id": "1530936782652109245", "dimensions": {"height": 1350, "width": 1080}, 
