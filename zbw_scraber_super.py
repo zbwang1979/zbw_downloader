@@ -1,6 +1,8 @@
 from abc import ABCMeta, abstractmethod
 import datetime
 import pytz
+import re
+import threading
 import logging
 import requests
 import time
@@ -32,7 +34,7 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         self.log_file=0
         self.busy_time = 5
         log_string = 'zbw scraber started at %s:\n' % \
-                     (SUPER_ZBW_DOWNLAOD.timestramp2day(self.start_time))
+                     (SUPER_ZBW_DOWNLAOD.timestamp2day(self.start_time))
         self.write_log(log_string)
         pass
 
@@ -49,7 +51,7 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
 
 
     @staticmethod
-    def timestramp2day(timestramp):
+    def timestamp2day(timestramp):
         tz = pytz.timezone(pytz.country_timezones('cn')[0])
         format_local_time= datetime.datetime.fromtimestamp(timestramp,tz).strftime('%Y-%m-%d %H:%M:%S\t')
         return format_local_time
@@ -131,6 +133,11 @@ class wait_busy(Exception):
     def __init__(self):
         pass
 
+class list4download(Exception):
+    def __init__(self,list_id):
+        self.working_list=list_id
+
+
 class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
     def __init__(self,user,password,threads_num,log_mod=0):
         super().__init__(user)
@@ -142,9 +149,11 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
         self.url = 'https://www.instagram.com/'
         self.user_name='"username": "modswzb"'
         self.login_post={}
-        self.owner_list=['9gag','doounias']
+        self.finished_working=True
+        self.working_list =  [{'name':item,'content':{'last_upload_time':0,'upload_list':[]}} \
+                              for item in ['9gag','doounias']]
         self.url_media_detail='https://www.instagram.com/p/%s/?taken-by=%s'
-        self.id=threads_num
+        self.max_threading=threads_num
         pass
 
     def check_alive(self):
@@ -199,37 +208,67 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
         if bool(login) and  login.status_code == 200:
             self.check_alive()
             if self.login_status:
-                log_string = 'threads %d login success!' % self.id
+                log_string = '%s login success!' % self.user_name
                 self.write_log(log_string)
             else:
                 self.write_log('Login error! Check your login data!')
         else:
             self.write_log('Login error! Connection error!'+str(login.status_code))
 
+    def download_files(self):
+        while True:
+            self.check_alive()
+            if not self.login_status:
+                return
+
+    def get_working_list(self):
+
+
+        for item in self.working_list:
+            """       self.working_list =  [{'name':item,'content':{'last_upload_time':0,'upload_list':[]}} \
+                              for item in ['9gag','doounias']]"""
+            r = self.page_open(self.s, self.url+item['name'])
+            find_list = re.findall\
+                (r'"__typename":\s*?"(GraphVideo|GraphImage)".*?"id":\s*?"(\d*?)".*?"code":\s*?"(.*?)".*?"date":\s*?(\d*?),', r.text)
+            if bool(find_list):
+                for (_type,_id,_code,_date)in find_list:
+                    if int(_date)>item['content']['last_upload_time']:
+                        item['content']['last_upload_time']=int(_date)>item['content']['last_upload_time']
+                        item['content']['upload_list'].append({'type':_type,'id':_id,'code':_code,'date':_date})
+                    else:
+                        continue
+
+
+
+
+
+
+
+
 
     def web_process(self):
-        self.check_alive()
-        if self.login_status:
-            # r=self.page_open(self.s,'https://www.instagram.com/p/BU_PRutlBfw/?taken-by=9gag')
-            r = self.page_open(self.s, 'https://www.instagram.com/9gag')
-            '''{"__typename": "GraphImage", "id": "1530936782652109245", "dimensions": {"height": 1350, "width": 1080}, 
-            "display_url": 
-            "https://scontent.cdninstagram.com/t51.2885-15/e35/18879770_842805019205274_2155076682027892736_n.jpg"'''
+        print('begin download here')
+        # r=self.page_open(self.s,'https://www.instagram.com/p/BU_PRutlBfw/?taken-by=9gag')
 
-            '''{"__typename": "GraphVideo", "id": "1530921244710862875", "dimensions": {"height": 765, "width": 612}, 
-            "display_url": 
-            "https://scontent.cdninstagram.com/t51.2885-15/e15/18949823_693358054185164_7558304849322835968_n.jpg", 
-            "is_video": true, "edge_media_to_tagged_user": {"edges": []}, "video_url": 
-            "https://scontent.cdninstagram.com/t50.2886-16/19027484_835885539896253_5949527215409463296_n.mp4"'''
-            print(r.text)
-        else:
-            return
-        pass
+        '''{"__typename": "GraphImage", "id": "1530936782652109245", "dimensions": {"height": 1350, "width": 1080}, 
+        "display_url": 
+        "https://scontent.cdninstagram.com/t51.2885-15/e35/18879770_842805019205274_2155076682027892736_n.jpg"'''
+
+        '''{"__typename": "GraphVideo", "id": "1530921244710862875", "dimensions": {"height": 765, "width": 612}, 
+        "display_url": 
+        "https://scontent.cdninstagram.com/t51.2885-15/e15/18949823_693358054185164_7558304849322835968_n.jpg", 
+        "is_video": true, "edge_media_to_tagged_user": {"edges": []}, "video_url": 
+        "https://scontent.cdninstagram.com/t50.2886-16/19027484_835885539896253_5949527215409463296_n.mp4"'''
+
 
     def run_flow(self):
         while True:
             if not self.login_status:
                 self.log_in()
                 continue
+            if  not self.finished_working:
+                time.sleep(2)
+                continue
+            self.get_working_list()
             self.web_process()
-            time.sleep(5)
+            time.sleep(10)
