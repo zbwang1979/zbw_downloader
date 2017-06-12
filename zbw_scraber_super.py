@@ -3,6 +3,7 @@ import datetime
 import pytz
 import re
 import threading
+import urllib.request
 import logging
 import requests
 import time
@@ -32,17 +33,11 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         self.home_dir=''
         self.is_busy = False
         self.log_file=0
-        self.busy_time = 5
+        self.busy_time = 2
         log_string = 'zbw scraber started at %s:\n' % \
                      (SUPER_ZBW_DOWNLAOD.timestamp2day(self.start_time))
         self.write_log(log_string)
         pass
-
-    def raise_wait(self):
-        instant_set=self.get_instance_set()
-        for instant in instant_set:
-            if instant.is_busy:
-                raise wait_busy
 
 
     def get_instance_set(self):
@@ -59,7 +54,6 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
 
     def write_log(self, log_text):
         """ Write log by print() or logger """
-
         if self.log_mod == 0:
             try:
                 print(log_text)
@@ -85,33 +79,33 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
             except UnicodeEncodeError:
                 print("Your text has unicode problem!")
 
+
     def page_open(self,requests_obj,url):
-        self.raise_wait()
+        while self.is_busy:
+            time.sleep(.5)
+        self.is_busy = True
+        r=None
         try:
-            self.is_busy = True
-            time.sleep(5 * random.random())
+            time.sleep(self.busy_time)
             r = requests_obj.get(url)
+        except Exception as e:
+            self.write_log(str(e))
+        finally:
             self.is_busy = False
             return r
-        except wait_busy:
-            time.sleep(self.busy_time)
-            self.is_busy=False
-            return
-
     def page_post(self,requests_obj,url,data):
-        self.raise_wait()
+        while self.is_busy:
+            time.sleep(.5)
+        self.is_busy = True
+        r=None
         try:
-            self.is_busy = True
-            time.sleep(5 * random.random())
+            time.sleep(self.busy_time)
             r = requests_obj.post(url, data=data, allow_redirects=True)
+        except Exception as e:
+            self.write_log(str(e))
+        finally:
             self.is_busy = False
             return r
-            # self.csrftoken = login.cookies['csrftoken']
-        except wait_busy:
-            time.sleep(self.busy_time)
-            self.is_busy = False
-            return
-
 
     @abstractmethod
     def log_in(self):
@@ -129,32 +123,35 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
     def run_flow(self):
         pass
 
-class wait_busy(Exception):
-    def __init__(self):
-        pass
-
-class list4download(Exception):
-    def __init__(self,list_id):
-        self.working_list=list_id
-
-
 class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
-    def __init__(self,user,password,threads_num,log_mod=0):
+    def __init__(self,user,password,threads_num,other_logger=None,call_back=None):
         super().__init__(user)
         self.user_login=user.lower()
         self.pass_word=password
-        self.log_mod=log_mod
+        self.call_back=call_back
+        self.other_logger=other_logger
         self.url_login='https://www.instagram.com/accounts/login/ajax/'
         self.s = requests.Session()
         self.url = 'https://www.instagram.com/'
         self.user_name='"username": "modswzb"'
         self.login_post={}
         self.finished_working=True
+        self.is_getting_item_from_list=False
+        self.has_finieshed_nums=0
         self.working_list =  [{'name':item,'content':{'last_upload_time':0,'upload_list':[]}} \
-                              for item in ['9gag','doounias']]
-        self.url_media_detail='https://www.instagram.com/p/%s/?taken-by=%s'
+                              for item in ['9gag','doounias','viraldiys']]
+        self.url_media_detail='https://www.instagram.com/p/'
         self.max_threading=threads_num
         pass
+    # def write_log(self, log_text):
+    #     if not bool(self.other_logger) :
+    #         try:
+    #             print(log_text)
+    #         except UnicodeEncodeError:
+    #             print("Your text has unicode problem!")
+    #     else:
+    #         self.other_logger.info(log_text)
+
 
     def check_alive(self):
         r=self.page_open(self.s,self.url)
@@ -215,15 +212,58 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
         else:
             self.write_log('Login error! Connection error!'+str(login.status_code))
 
-    def download_files(self):
+    def download_files(self,total_nums,filename=None):
+        # while True:
+        #     self.check_alive()
+        #     if not self.login_status:
+        #         return
+        # test_url='https://scontent.cdninstagram.com/t50.2886-16/19054712_1515312775198294_3211878201529729024_n.mp4'
         while True:
             self.check_alive()
             if not self.login_status:
+                self.is_getting_item_from_list = False
                 return
+            while self.is_getting_item_from_list:
+                time.sleep(.5)
+            self.is_getting_item_from_list=True
+            item=self.pop_from_working_list()
+            if not bool(item):
+                print('downloading threading finished!')
+                self.is_getting_item_from_list = False
+                return
+            try:
+                item = dict(item)
+                url=self.url_media_detail+item['code']
+                self.write_log('start downloading %s/%s update at%s'%(item['type'],item['code'],item['date']))
+                time.sleep(self.busy_time)
+                # local_file,headers=urllib.request.urlretrieve(url, filename=filename)
+                self.is_getting_item_from_list = False
+                self.has_finieshed_nums +=1
+                self.write_log('%s has downloaded successfully finished:%d/total:%d'%\
+                               ('file',self.has_finieshed_nums,total_nums))
+                if hasattr(self.call_back,'__call__'):
+                    self.call_back()
+                    continue
+            except Exception as e:
+                self.is_getting_item_from_list = False
+                self.write_log(str(e))
 
-    def get_working_list(self):
+
+    def pop_from_working_list(self):
+        try:
+            for item in self.working_list:
+                if len(item['content']['upload_list'])==0:
+                    continue
+                else:
+                    return  item['content']['upload_list'].pop(0)
+        except Exception as e:
+            self.write_log(str(e))
+            self.finished_working = True
+        self.finished_working=True
 
 
+    def create_working_list(self):
+        total_nums=0
         for item in self.working_list:
             """       self.working_list =  [{'name':item,'content':{'last_upload_time':0,'upload_list':[]}} \
                               for item in ['9gag','doounias']]"""
@@ -231,45 +271,37 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
             find_list = re.findall\
                 (r'"__typename":\s*?"(GraphVideo|GraphImage)".*?"id":\s*?"(\d*?)".*?"code":\s*?"(.*?)".*?"date":\s*?(\d*?),', r.text)
             if bool(find_list):
-                for (_type,_id,_code,_date)in find_list:
-                    if int(_date)>item['content']['last_upload_time']:
-                        item['content']['last_upload_time']=int(_date)>item['content']['last_upload_time']
+                for (_type,_id,_code,_date)in find_list[:-1]:
+                    if int(_date) > item['content']['last_upload_time']:
                         item['content']['upload_list'].append({'type':_type,'id':_id,'code':_code,'date':_date})
+                        total_nums+=1
+                else:
+                    if int(find_list[0][-1]) > item['content']['last_upload_time']:
+                        item['content']['last_upload_time'] = int(find_list[0][-1])
+                        self.write_log('follow:%s last_upload_time at %s'%\
+                                       (item['name'],self.timestamp2day(item['content']['last_upload_time'])))
                     else:
                         continue
-
-
-
-
-
-
-
-
+            time.sleep(2)
+        self.write_log('get new item nums:%d'%total_nums)
+        return total_nums
 
     def web_process(self):
-        print('begin download here')
-        print(self.working_list)
-        # r=self.page_open(self.s,'https://www.instagram.com/p/BU_PRutlBfw/?taken-by=9gag')
-
-        '''{"__typename": "GraphImage", "id": "1530936782652109245", "dimensions": {"height": 1350, "width": 1080}, 
-        "display_url": 
-        "https://scontent.cdninstagram.com/t51.2885-15/e35/18879770_842805019205274_2155076682027892736_n.jpg"'''
-
-        '''{"__typename": "GraphVideo", "id": "1530921244710862875", "dimensions": {"height": 765, "width": 612}, 
-        "display_url": 
-        "https://scontent.cdninstagram.com/t51.2885-15/e15/18949823_693358054185164_7558304849322835968_n.jpg", 
-        "is_video": true, "edge_media_to_tagged_user": {"edges": []}, "video_url": 
-        "https://scontent.cdninstagram.com/t50.2886-16/19027484_835885539896253_5949527215409463296_n.mp4"'''
-
+        self.finished_working=False
+        nums=self.create_working_list()
+        self.has_finieshed_nums=0
+        for i in range(0,self.max_threading):
+            t=threading.Thread(target=lambda : self.download_files(nums),daemon=True)
+            t.start()
 
     def run_flow(self):
+        self.check_alive()
         while True:
             if not self.login_status:
                 self.log_in()
                 continue
             if  not self.finished_working:
-                time.sleep(2)
+                time.sleep(.5)
                 continue
-            self.get_working_list()
             self.web_process()
             time.sleep(10)
