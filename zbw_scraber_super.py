@@ -4,10 +4,10 @@ import pytz
 import re
 import threading
 import urllib.request
+import os
 import logging
 import requests
 import time
-import random
 import weakref
 
 
@@ -51,6 +51,13 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         format_local_time= datetime.datetime.fromtimestamp(timestramp,tz).strftime('%Y-%m-%d %H:%M:%S\t')
         return format_local_time
         pass
+    @staticmethod
+    def remove_emoji(txt):
+        emoji_pattern = re.compile(r'\\u([a-z]|[0-9]|[A-Z]){4}')
+        e2 = re.compile(r'\\n')
+        txt2=re.sub(e2, '', re.sub(emoji_pattern, '', txt))
+        res_txt=(''.join([char for char in txt2 if char.isprintable()])).replace("\\", '')
+        return res_txt
 
     def write_log(self, log_text):
         """ Write log by print() or logger """
@@ -124,7 +131,7 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         pass
 
 class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
-    def __init__(self,user,password,threads_num,other_logger=None,call_back=None):
+    def __init__(self,user,password,receive_files_num=2,other_logger=None,call_back=None):
         super().__init__(user)
         self.user_login=user.lower()
         self.pass_word=password
@@ -135,13 +142,14 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
         self.url = 'https://www.instagram.com/'
         self.user_name='"username": "modswzb"'
         self.login_post={}
+        self.log_nums_files=0
+        self.log_size_receive=0
         self.finished_working=True
-        self.is_getting_item_from_list=False
         self.has_finieshed_nums=0
-        self.working_list =  [{'name':item,'content':{'last_upload_time':0,'upload_list':[]}} \
+        self.working_list =  [{'name':item,'content':{'last_upload_time':int(self.start_time),'upload_list':[]}} \
                               for item in ['9gag','doounias','viraldiys']]
         self.url_media_detail='https://www.instagram.com/p/'
-        self.max_threading=threads_num
+        self.max_receive_files=receive_files_num
         pass
     # def write_log(self, log_text):
     #     if not bool(self.other_logger) :
@@ -212,40 +220,76 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
         else:
             self.write_log('Login error! Connection error!'+str(login.status_code))
 
-    def download_files(self,total_nums,filename=None):
-        # while True:
-        #     self.check_alive()
-        #     if not self.login_status:
-        #         return
-        # test_url='https://scontent.cdninstagram.com/t50.2886-16/19054712_1515312775198294_3211878201529729024_n.mp4'
+    def get_details(self,url,item):
+        r=self.page_open(self.s,url)
+        if bool(r):
+            if 'image' in item['type'].lower():
+                filename = 'zbw_%s.jpg' % item['id']
+                '''"display_url": "https://scontent.cdninstagram.com/t51.2885-15/e35/19051844_1834502583534667\
+                "text": "Out beyond the ideas of right and wrong there is a field.\nI will meet you there. \
+                \ud83c\udf24\n.\n\ud83c\udde8\ud83c\udded@switzerland.vacations"_1764999162270580736_n.jpg"'''
+                match_url = re.search(r'"display_url":\s*?"(.*?)"', r.text,re.DOTALL)
+            else:
+                filename = 'zbw_%s.mp4' % item['id']
+                '''"video_url": "https://scontent.cdninstagram.com/t50.2886-16/19054712_1515312\
+                775198294_3211878201529729024_n.mp4"'''
+                match_url = re.search(r'"video_url":\s*?"(.*?)"', r.text,re.DOTALL)
+            res_url = match_url.group(1)
+            match_desc=None
+            try:
+                match_desc = re.search('"text":\s*?"(.*?)"', r.text, re.DOTALL)
+                if bool(match_desc):
+                    desc=match_desc.group(1)
+                else:
+                    desc=''
+            except ValueError:
+                if bool(match_desc.group(1)):
+                    desc=match_desc.group(1)
+                else:
+                    desc =''
+            try:
+                time.sleep(self.busy_time)
+                urllib.request.urlretrieve(res_url, filename=filename)
+            except Exception as e:
+                self.write_log(str(e))
+            return filename,SUPER_ZBW_DOWNLAOD.remove_emoji(desc)
+
+        pass
+
+    def download_files(self,total_nums):
+
         while True:
+            time.sleep(self.busy_time)
             self.check_alive()
             if not self.login_status:
-                self.is_getting_item_from_list = False
+                self.finished_working = True
                 return
-            while self.is_getting_item_from_list:
-                time.sleep(.5)
-            self.is_getting_item_from_list=True
-            item=self.pop_from_working_list()
+            owner_name,item=self.pop_from_working_list()
             if not bool(item):
-                print('downloading threading finished!')
-                self.is_getting_item_from_list = False
+                self.write_log('downloading finished\nstatus：today_files_nums:%d totalsize:%dKb'%(self.log_nums_files,
+                                                                                     self.log_size_receive))
                 return
+            item = dict(item)
+            url=self.url_media_detail+item['code']
+            self.write_log('start downloading %s at %s'%(url,SUPER_ZBW_DOWNLAOD.timestamp2day(time.time())))
+
+            filename,file_desc=self.get_details(url,item)
+            if not bool(filename):
+                return
+            self.has_finieshed_nums +=1
+            if time.time()-self.start_time > 24*60*60:
+                self.log_nums_files =0
+                self.log_size_receive=0
+                self.write_log('log files nums reset!')
+            self.log_nums_files+=1
             try:
-                item = dict(item)
-                url=self.url_media_detail+item['code']
-                self.write_log('start downloading %s/%s update at%s'%(item['type'],item['code'],item['date']))
-                time.sleep(self.busy_time)
-                # local_file,headers=urllib.request.urlretrieve(url, filename=filename)
-                self.is_getting_item_from_list = False
-                self.has_finieshed_nums +=1
-                self.write_log('%s has downloaded successfully finished:%d/total:%d'%\
-                               ('file',self.has_finieshed_nums,total_nums))
+                file_size=round(float(os.path.getsize(filename))/1024,3)
+                self.log_size_receive+=file_size
+                self.write_log('%s size:%dKb downloaded successfully\tfinished:%d/total:%d'%\
+                               (filename,file_size,self.has_finieshed_nums,total_nums))
                 if hasattr(self.call_back,'__call__'):
-                    self.call_back()
-                    continue
+                    self.call_back(filename,file_desc,item['type'],owner_name)
             except Exception as e:
-                self.is_getting_item_from_list = False
                 self.write_log(str(e))
 
 
@@ -255,11 +299,12 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
                 if len(item['content']['upload_list'])==0:
                     continue
                 else:
-                    return  item['content']['upload_list'].pop(0)
+                    return  item['name'],item['content']['upload_list'].pop(0)
         except Exception as e:
             self.write_log(str(e))
             self.finished_working = True
         self.finished_working=True
+        return None,None
 
 
     def create_working_list(self):
@@ -271,10 +316,12 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
             find_list = re.findall\
                 (r'"__typename":\s*?"(GraphVideo|GraphImage)".*?"id":\s*?"(\d*?)".*?"code":\s*?"(.*?)".*?"date":\s*?(\d*?),', r.text)
             if bool(find_list):
+                find_list=find_list[0:self.max_receive_files if self.max_receive_files<len(find_list)\
+                    else len(find_list)]
                 for (_type,_id,_code,_date)in find_list[:-1]:
                     if int(_date) > item['content']['last_upload_time']:
-                        item['content']['upload_list'].append({'type':_type,'id':_id,'code':_code,'date':_date})
                         total_nums+=1
+                        item['content']['upload_list'].append({'type':_type,'id':_id,'code':_code,'date':_date})
                 else:
                     if int(find_list[0][-1]) > item['content']['last_upload_time']:
                         item['content']['last_upload_time'] = int(find_list[0][-1])
@@ -282,26 +329,27 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
                                        (item['name'],self.timestamp2day(item['content']['last_upload_time'])))
                     else:
                         continue
-            time.sleep(2)
-        self.write_log('get new item nums:%d'%total_nums)
+            time.sleep(self.busy_time)
+            self.write_log('get new item nums:%d' % total_nums)
         return total_nums
+
 
     def web_process(self):
         self.finished_working=False
         nums=self.create_working_list()
         self.has_finieshed_nums=0
-        for i in range(0,self.max_threading):
+        if nums>0:
             t=threading.Thread(target=lambda : self.download_files(nums),daemon=True)
             t.start()
+        else:
+            self.finished_working=True
+            self.write_log('no news post at %s'%SUPER_ZBW_DOWNLAOD.timestamp2day(time.time()))
 
     def run_flow(self):
-        self.check_alive()
-        while True:
-            if not self.login_status:
-                self.log_in()
-                continue
-            if  not self.finished_working:
-                time.sleep(.5)
-                continue
-            self.web_process()
-            time.sleep(10)
+        time.sleep(self.busy_time)
+        if  not self.finished_working:
+            return
+        if not self.login_status:
+            self.log_in()
+            return
+        self.web_process()
