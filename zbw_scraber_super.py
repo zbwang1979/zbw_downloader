@@ -31,7 +31,6 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         self.user_login=user
         self.login_status=False
         self.home_dir=''
-        self.is_busy = False
         self.log_file=0
         self.busy_time = 2
         log_string = 'zbw scraber started at %s:\n' % \
@@ -88,9 +87,6 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
 
 
     def page_open(self,requests_obj,url):
-        while self.is_busy:
-            time.sleep(.5)
-        self.is_busy = True
         r=None
         try:
             time.sleep(self.busy_time)
@@ -98,12 +94,8 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         except Exception as e:
             self.write_log(str(e))
         finally:
-            self.is_busy = False
             return r
     def page_post(self,requests_obj,url,data):
-        while self.is_busy:
-            time.sleep(.5)
-        self.is_busy = True
         r=None
         try:
             time.sleep(self.busy_time)
@@ -111,7 +103,6 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         except Exception as e:
             self.write_log(str(e))
         finally:
-            self.is_busy = False
             return r
 
     @abstractmethod
@@ -349,7 +340,7 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
         time.sleep(self.busy_time)
         if  not self.finished_working:
             return
+        self.check_alive()
         if not self.login_status:
             self.log_in()
-            return
         self.web_process()
