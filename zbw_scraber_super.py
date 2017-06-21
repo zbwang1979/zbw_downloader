@@ -53,9 +53,11 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
     @staticmethod
     def remove_emoji(txt):
         emoji_pattern = re.compile(r'\\u([a-z]|[0-9]|[A-Z]){4}')
-        e2 = re.compile(r'\\n')
-        txt2=re.sub(e2, '', re.sub(emoji_pattern, '', txt))
-        res_txt=(''.join([char for char in txt2 if char.isprintable()])).replace("\\", '')
+        e1=re.compile(r'\\n')
+        txt2=re.sub(e1, '', re.sub(emoji_pattern, '', txt))
+        e2 = re.compile(r'#\S*?\s')
+        txt3=re.sub(e2,'',txt2)
+        res_txt=(''.join([char for char in txt3 if char.isprintable()])).replace("\\", '')
         return res_txt
 
     def write_log(self, log_text):
@@ -122,7 +124,7 @@ class SUPER_ZBW_DOWNLAOD(metaclass=ABCMeta):
         pass
 
 class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
-    def __init__(self,user,password,receive_files_num=2,other_logger=None,call_back=None):
+    def __init__(self,user,password,receive_files_num=1,other_logger=None,call_back=None):
         super().__init__(user)
         self.user_login=user.lower()
         self.pass_word=password
@@ -138,7 +140,7 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
         self.finished_working=True
         self.has_finieshed_nums=0
         self.working_list =  [{'name':item,'content':{'last_upload_time':int(self.start_time),'upload_list':[]}} \
-                              for item in ['9gag','doounias','viraldiys']]
+                              for item in ['laugh.r.us','doounias','viraldiys','todays.bucketlist']]
         self.url_media_detail='https://www.instagram.com/p/'
         self.max_receive_files=receive_files_num
         pass
@@ -309,19 +311,16 @@ class zbw_scraber_instagram(SUPER_ZBW_DOWNLAOD):
             if bool(find_list):
                 find_list=find_list[0:self.max_receive_files if self.max_receive_files<len(find_list)\
                     else len(find_list)]
-                for (_type,_id,_code,_date)in find_list[:-1]:
+                for (_type,_id,_code,_date)in find_list:
                     if int(_date) > item['content']['last_upload_time']:
                         total_nums+=1
                         item['content']['upload_list'].append({'type':_type,'id':_id,'code':_code,'date':_date})
-                else:
-                    if int(find_list[0][-1]) > item['content']['last_upload_time']:
-                        item['content']['last_upload_time'] = int(find_list[0][-1])
-                        self.write_log('follow:%s last_upload_time at %s'%\
-                                       (item['name'],self.timestamp2day(item['content']['last_upload_time'])))
-                    else:
-                        continue
+                if int(find_list[0][-1]) > item['content']['last_upload_time']:
+                    item['content']['last_upload_time'] = int(find_list[0][-1])
+                    self.write_log('follow:%s last_upload_time updated at %d'%\
+                                   (item['name'],int(find_list[0][-1])))
             time.sleep(self.busy_time)
-            self.write_log('get new item nums:%d' % total_nums)
+        self.write_log('get new item nums:%d' % total_nums)
         return total_nums
 
 
